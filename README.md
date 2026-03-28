@@ -2,6 +2,8 @@
 
 A competition entry for the **Cactus Evals** hackathon, where the goal is to build the most accurate and fastest on-device function-calling system using a 270M parameter model running locally via the [Cactus](https://github.com/cactus-compute/cactus) runtime.
 
+Ranked Top 5 on the Evaluation Leaderboard in Singapore
+
 ---
 
 ## What This Project Does
