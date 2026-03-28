@@ -1,125 +1,137 @@
-<img src="assets/banner.png" alt="Banner" style="border-radius: 30px; width: 100%;">
+# FunctionGemma Hackathon
 
-# FunctionGemma hackathon starter
-
-**Leaderboard:** [cactusevals.ngrok.app](https://cactusevals.ngrok.app)
-
-Minimal repo for the Cactus × Google DeepMind hackathon: turn user chat into **function calls** (tools) using **FunctionGemma on-device** (via [Cactus](https://cactuscompute.com)) and **Gemini 2.5 Flash** when the local path fails validation. You implement the policy inside **`generate_hybrid(messages, tools)`** in [`main.py`](main.py).
+A competition entry for the **Cactus Evals** hackathon, where the goal is to build the most accurate and fastest on-device function-calling system using a 270M parameter model running locally via the [Cactus](https://github.com/cactus-compute/cactus) runtime.
 
 ---
 
-## What this project does
+## What This Project Does
 
-1. **`benchmark.py`** builds a list of assistant scenarios (weather, alarms, reminders, SMS-style messaging, contact search, music, timers). For each case it calls **`generate_hybrid`** with OpenAI-style **tool definitions** and checks returned **`function_calls`** against gold arguments (F1-style matching).
-2. **`main.py`** loads **FunctionGemma 270M IT** from `cactus/weights/functiongemma-270m-it`, runs **`cactus_complete`** with **`force_tools=True`**, repairs JSON and arguments, and optionally calls **`google.genai`** (Gemini) for a second pass.
-3. **`submit.py`** uploads **`main.py`** only to the remote eval server and prints score, F1, latency, and on-device percentage.
+Given a user's natural language message and a set of available tools (functions), the system must:
 
-There is no web app, database, or extra packages beyond what Cactus + `google-genai` need for this flow.
+1. Identify which tool(s) to call
+2. Extract the correct arguments from the message
+3. Return structured JSON with the function call(s)
 
----
+For example:
 
-## Edge vs cloud
+> **User:** "Set an alarm for 7:30 AM and check the weather in New York."
+>
+> **Output:**
+> ```json
+> {
+>   "function_calls": [
+>     {"name": "set_alarm", "arguments": {"hour": 7, "minute": 30}},
+>     {"name": "get_weather", "arguments": {"location": "New York"}}
+>   ]
+> }
+> ```
 
-| | **Edge (on-device)** | **Cloud** |
-| --- | --- | --- |
-| **Stack** | `cactus_init` + `cactus_complete`, model path `cactus/weights/functiongemma-270m-it` | `genai.Client`, model **`gemini-2.5-flash`** |
-| **When** | Always tried first (per clause for multi-intent prompts, or once for single-intent) | After **`_validate`** fails on local output, or any multi-tool **clause** fails (then whole message goes to Gemini) |
-| **Marked as** | `source: "on-device"` | `source: "cloud"` (or `"empty"` if cloud returns no calls) |
-
-**`benchmark.py`** sets `CACTUS_NO_CLOUD_TELE=1`; scoring uses **`result.get("source", "unknown")`** so your hybrid router should set `source` when possible.
-
-**Tool RAG:** `_infer_local` passes **`tool_rag_top_k: 3`** into `cactus_complete` only when **`len(tools) > 4`**.
-
-**Local inference defaults:** `temperature=0`, `max_tokens` 80 or 112, and Gemma stop sequences including `<end_of_turn>` (see `_infer_local` in `main.py`).
-
----
-
-## `generate_hybrid` routing (summary)
-
-- **Multi-intent message** (`_is_multi_tool`): split with `_split_into_clauses`, optional **`_resolve_pronouns`**, then for each clause **`_infer_local` → `_fix_args` → `_validate`**. If any clause fails, **`_infer_cloud(messages, tools)`** on the **full** user turn (plus prior `total_time_ms`). If all succeed, concatenate calls and return **`source: "on-device"`**.
-- **Single-intent:** one **`_infer_local`**, **`_fix_args`**, **`_validate`**; on failure **`_infer_cloud`** with accumulated time.
-- **Cloud unavailable:** exceptions in **`_infer_cloud`** fall back to whatever local produced (multi-tool may return partial `all_calls`).
-
-Main helpers (all in `main.py`): **`_build_prompt` / `_get_base_prompt`**, **`_fix_json` / `_try_parse`**, **`_fix_args`**, **`_validate`**.
+The system runs **on-device** using `functiongemma-270m-it` (a 270M parameter instruction-tuned model) via the Cactus runtime, with Google Gemini as a cloud fallback.
 
 ---
 
-## Repository layout
+## Supported Tools
 
-| File | Role |
-| --- | --- |
-| [`main.py`](main.py) | Hybrid router — **only the body of `generate_hybrid` is meant to be your submission** (keep signature and return shape compatible with `benchmark.py`) |
-| [`benchmark.py`](benchmark.py) | Seven tool schemas, **30** eval cases (10 easy / 10 medium / 10 hard), `run_benchmark`, `compute_total_score` |
-| [`submit.py`](submit.py) | POST `main.py` to `https://cactusevals.ngrok.app` |
-
-`cactus/` is gitignored here; you clone/build Cactus separately per organizer instructions.
-
----
-
-## Tools (benchmark)
-
-| Name | Purpose |
-| --- | --- |
-| `get_weather` | `location` |
-| `set_alarm` | `hour`, `minute` (24h internally after repair) |
-| `send_message` | `recipient`, `message` |
-| `create_reminder` | `title`, `time` |
-| `search_contacts` | `query` |
-| `play_music` | `song` |
-| `set_timer` | `minutes` |
+| Tool | Description |
+|---|---|
+| `get_weather` | Get current weather for a city |
+| `set_alarm` | Set an alarm (hour + minute in 24h format) |
+| `send_message` | Send a message to a named contact |
+| `create_reminder` | Create a reminder with a title and time |
+| `search_contacts` | Search for a contact by name |
+| `play_music` | Play a song or playlist |
+| `set_timer` | Set a countdown timer in minutes |
 
 ---
 
-## Scoring (`benchmark.py`)
+## How It Works
 
-Per case: **F1** over `function_calls` vs `expected_calls`, **`total_time_ms`**, **`source`**.
+### On-Device Inference (`main.py`)
 
-Per difficulty bucket, the combined level score is:
+The core logic lives in `generate_hybrid()` and uses several layers of optimisation to squeeze accuracy out of a 270M model:
 
-`0.60 × avg_F1 + 0.15 × time_score + 0.25 × on_device_ratio`
+**1. Hinted Prompts**
+Before calling the model, the prompt is pre-populated with hints extracted by rule-based parsing (regex). This includes:
+- Time values converted to the correct format (`3:00 PM`, `7:30 AM`)
+- Alarm hours converted to 24-hour integers
+- Recipient/location/query names copied verbatim from the message
 
-where `time_score = max(0, 1 - avg_time_ms / 500)`.
+This reduces ambiguity and gives the model maximum context in minimal tokens.
 
-Difficulty weights: **easy 20%**, **medium 30%**, **hard 50%**. Printed **TOTAL SCORE** is in **0–100%**.
+**2. Multi-Tool Clause Splitting**
+Requests containing multiple actions (e.g., "set an alarm *and* check the weather") are split into individual clauses. The model is called once per clause — small models handle one tool at a time far more reliably than generating multiple tool calls in one shot.
 
-The hosted leaderboard (`submit.py`) reports **`score`**, **`f1`**, **`avg_time_ms`**, **`on_device_pct`** from the server.
+**3. Argument Post-Processing**
+After inference, arguments are normalised and validated:
+- Time strings are normalised to `HH:MM AM/PM`
+- Alarm hours are recomputed from the original message (the model often gets 24h conversion wrong)
+- Reminder titles have time expressions stripped out
+- Proper-noun casing is restored for names and locations
 
----
-
-## Quick start
-
-1. Install **Cactus** from [cactus-compute/cactus](https://github.com/cactus-compute/cactus): `source ./setup`, `cactus build --python`, `cactus download google/functiongemma-270m-it --reconvert`, `cactus auth`.
-2. In this repo directory (next to your `cactus` tree): `pip install google-genai` and `export GEMINI_API_KEY=...` if you want cloud fallback locally.
-3. `python benchmark.py`
-4. `python submit.py --team "YourTeam" --location "YourCity"`
-
-Hackathon rule: do not change **`generate_hybrid`**’s parameters or the required return fields expected by **`benchmark.py`**.
-
----
-
-## Diagrams (Mermaid)
-
-**Not required.** The pipeline is a small if/branch (multi vs single → local → optional Gemini). Tables above are enough; add a diagram only if you introduce more stages or services.
+**4. Cloud Fallback**
+If on-device inference fails validation, the system attempts a call to `gemini-2.5-flash` as a best-effort fallback. In the eval environment the cloud is unavailable, so the system is optimised entirely for on-device accuracy.
 
 ---
 
-## Links
+## Scoring
 
-- [Cactus API keys](https://cactuscompute.com/dashboard/api-keys) · [Gemini API keys](https://aistudio.google.com/api-keys) · [r/cactuscompute](https://www.reddit.com/r/cactuscompute/)
-- Hackathon credits (if still active): [SF](https://trygcp.dev/claim/cactus-x-gdm-hackathon-sf), [Boston](https://trygcp.dev/claim/cactus-x-gdm-hackathon-boston), [DC](https://trygcp.dev/claim/cactus-x-gdm-hackathon-dc), [London](https://trygcp.dev/claim/cactus-x-gdm-hackathon-london), [Singapore](https://trygcp.dev/claim/cactus-x-gdm-hackathon), [Online](https://trygcp.dev/claim/cactus-x-gdm-hackathon-online)
+Submissions are evaluated on three metrics, weighted by difficulty:
+
+| Metric | Weight |
+|---|---|
+| F1 score (accuracy of tool calls) | 60% |
+| Time score (faster → higher, capped at 500ms baseline) | 15% |
+| On-device ratio (higher local usage → higher score) | 25% |
+
+**Difficulty weights:**
+- Easy (single tool, direct request): 20%
+- Medium (2–4 tools presented, must pick the right one): 30%
+- Hard (multiple tools required, compound requests): 50%
 
 ---
 
-## Minimal Cactus usage (reference)
+## Project Structure
 
-```python
-import json
-from cactus import cactus_init, cactus_complete, cactus_destroy
-
-model = cactus_init("weights/lfm2-vl-450m")
-response = json.loads(cactus_complete(model, [{"role": "user", "content": "Hello"}], max_tokens=100))
-print(response.get("response"))
-cactus_destroy(model)
+```
+.
+├── main.py          # Core function-calling logic (submit this)
+├── benchmark.py     # Local benchmark runner with 30 test cases
+└── submit.py        # Submission script for the Cactus Evals leaderboard
 ```
 
-This repo’s [`main.py`](main.py) uses **`cactus/python/src`** on `sys.path` and weights at **`cactus/weights/functiongemma-270m-it`**. Full `cactus_complete` options (tools, `force_tools`, `tool_rag_top_k`, `confidence_threshold`, streaming, etc.) are documented in the upstream Cactus README.
+---
+
+## Setup
+
+This project requires the [Cactus](https://github.com/cactus-compute/cactus) runtime and the `functiongemma-270m-it` model weights:
+
+```
+cactus/
+├── python/src/      # Cactus Python bindings
+└── weights/
+    └── functiongemma-270m-it/
+```
+
+For the cloud fallback, set your Gemini API key:
+
+```bash
+export GEMINI_API_KEY=your_key_here
+```
+
+---
+
+## Running Locally
+
+**Run the benchmark** (30 test cases across easy / medium / hard):
+
+```bash
+python benchmark.py
+```
+
+**Submit to the leaderboard:**
+
+```bash
+python submit.py --team "YourTeamName" --location "SF"
+```
+
+The submit script uploads `main.py`, queues it for evaluation on the server, and polls for results, printing your final score, F1, average latency, and on-device percentage.
