@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 250" width="900" height="250" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-label="Request flow of generate_hybrid in main.py">
+  <g fill="#1f2328" font-size="14">
+    <text x="20" y="92" font-weight="600">user message</text>
+    <text x="20" y="112" fill="#59636e" font-size="12">+ tool list</text>
+    <text x="170" y="62" font-weight="600">split into clauses</text>
+    <text x="170" y="80" fill="#59636e" font-size="12">only if 2+ action verbs</text>
+    <text x="170" y="96" fill="#59636e" font-size="12">and a connector</text>
+    <text x="400" y="62" font-weight="600">hinted prompt</text>
+    <text x="400" y="80" fill="#59636e" font-size="12">regex-extracted times, names</text>
+    <text x="400" y="104" font-weight="600">270M model on device</text>
+    <text x="400" y="122" fill="#59636e" font-size="12">one call per clause</text>
+    <text x="640" y="62" font-weight="600">fix args + validate</text>
+    <text x="640" y="80" fill="#59636e" font-size="12">recompute 24h alarm hours,</text>
+    <text x="640" y="96" fill="#59636e" font-size="12">normalise times, restore casing</text>
+    <text x="780" y="170" font-weight="600">function_calls</text>
+    <text x="780" y="188" fill="#59636e" font-size="12">JSON</text>
+    <text x="400" y="220" font-weight="600">Gemini 2.5 Flash fallback</text>
+    <text x="400" y="240" fill="#59636e" font-size="12">whole request, only when validation fails</text>
+  </g>
+  <path d="M20 140 H870" fill="none" stroke="#d1242f" stroke-width="8"/>
+  <path d="M630 148 V200 H396" fill="none" stroke="#8c959f" stroke-width="2" stroke-dasharray="5 4"/>
+</svg>

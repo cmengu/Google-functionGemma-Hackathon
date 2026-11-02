@@ -1,12 +1,21 @@
-# FunctionGemma Hackathon
+<h1 align="center">FunctionGemma Hackathon</h1>
 
-A competition entry for the **Cactus Evals** hackathon, where the goal is to build the most accurate and fastest on-device function-calling system using a 270M parameter model running locally via the [Cactus](https://github.com/cactus-compute/cactus) runtime.
+<p align="center">Function calling with a 270M-parameter model that runs on the device, built for the Cactus Evals hackathon.</p>
 
-Ranked Top 5 on the Evaluation Leaderboard in Singapore
+<p align="center">
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg">
+<img src="docs/how-it-works-light.svg" alt="A request flows left to right: user message, optional split into clauses, hinted prompt, on-device 270M model, argument fixing and validation, then function_calls JSON. A dashed branch from validation goes to a Gemini 2.5 Flash fallback." width="900">
+</picture>
+</p>
 
----
+<p align="center">The request path in <code>generate_hybrid()</code> (<code>main.py</code>), drawn from the code.</p>
 
-## What This Project Does
+## Why
+
+A 270M model is fast and runs locally, but it often gets arguments wrong and struggles with several tool calls in one message. This entry compensates with rule-based hints before the model call, one model call per clause, and argument repair afterwards. A cloud model is called only when on-device output fails validation.
+
+## What it does
 
 Given a user's natural language message and a set of available tools (functions), the system must:
 
@@ -28,9 +37,9 @@ For example:
 > }
 > ```
 
-The system runs **on-device** using `functiongemma-270m-it` (a 270M parameter instruction-tuned model) via the Cactus runtime, with Google Gemini as a cloud fallback.
+The system runs on-device using `functiongemma-270m-it` via the Cactus runtime, with `gemini-2.5-flash` as a cloud fallback.
 
----
+The entry was ranked top 5 on the Singapore evaluation leaderboard (reported by the author; no results are committed in this repo).
 
 ## Supported Tools
 
@@ -44,15 +53,13 @@ The system runs **on-device** using `functiongemma-270m-it` (a 270M parameter in
 | `play_music` | Play a song or playlist |
 | `set_timer` | Set a countdown timer in minutes |
 
----
-
 ## How It Works
 
 ### On-Device Inference (`main.py`)
 
 The core logic lives in `generate_hybrid()` and uses several layers of optimisation to squeeze accuracy out of a 270M model:
 
-**1. Hinted Prompts**
+**1. Hinted prompts**
 Before calling the model, the prompt is pre-populated with hints extracted by rule-based parsing (regex). This includes:
 - Time values converted to the correct format (`3:00 PM`, `7:30 AM`)
 - Alarm hours converted to 24-hour integers
@@ -60,20 +67,18 @@ Before calling the model, the prompt is pre-populated with hints extracted by ru
 
 This reduces ambiguity and gives the model maximum context in minimal tokens.
 
-**2. Multi-Tool Clause Splitting**
+**2. Multi-tool clause splitting**
 Requests containing multiple actions (e.g., "set an alarm *and* check the weather") are split into individual clauses. The model is called once per clause — small models handle one tool at a time far more reliably than generating multiple tool calls in one shot.
 
-**3. Argument Post-Processing**
+**3. Argument post-processing**
 After inference, arguments are normalised and validated:
 - Time strings are normalised to `HH:MM AM/PM`
 - Alarm hours are recomputed from the original message (the model often gets 24h conversion wrong)
 - Reminder titles have time expressions stripped out
 - Proper-noun casing is restored for names and locations
 
-**4. Cloud Fallback**
-If on-device inference fails validation, the system attempts a call to `gemini-2.5-flash` as a best-effort fallback. In the eval environment the cloud is unavailable, so the system is optimised entirely for on-device accuracy.
-
----
+**4. Cloud fallback**
+If on-device inference fails validation, the system tries `gemini-2.5-flash` as a best-effort fallback. If that call raises (for example no API key), the on-device result is returned as is. The author reports the cloud is unavailable in the eval environment (not verifiable from this repo).
 
 ## Scoring
 
@@ -90,8 +95,6 @@ Submissions are evaluated on three metrics, weighted by difficulty:
 - Medium (2–4 tools presented, must pick the right one): 30%
 - Hard (multiple tools required, compound requests): 50%
 
----
-
 ## Project Structure
 
 ```
@@ -100,8 +103,6 @@ Submissions are evaluated on three metrics, weighted by difficulty:
 ├── benchmark.py     # Local benchmark runner with 30 test cases
 └── submit.py        # Submission script for the Cactus Evals leaderboard
 ```
-
----
 
 ## Setup
 
@@ -119,8 +120,6 @@ For the cloud fallback, set your Gemini API key:
 ```bash
 export GEMINI_API_KEY=your_key_here
 ```
-
----
 
 ## Running Locally
 
